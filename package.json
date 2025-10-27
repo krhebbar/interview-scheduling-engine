@@ -1,0 +1,70 @@
+{
+  "name": "interview-scheduling-engine",
+  "version": "1.0.0",
+  "description": "Production-grade TypeScript library for intelligent interview scheduling with multi-day support, load balancing, and calendar integration",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "clean": "rm -rf dist",
+    "example:basic": "tsx examples/basic-scheduling.ts",
+    "example:multi-day": "tsx examples/multi-day-scheduling.ts",
+    "example:load-balancing": "tsx examples/load-balancing.ts"
+  },
+  "keywords": [
+    "interview",
+    "scheduling",
+    "calendar",
+    "recruiting",
+    "hiring",
+    "hr-tech",
+    "typescript",
+    "constraint-satisfaction",
+    "backtracking",
+    "algorithm"
+  ],
+  "author": "Ravi Hebbar <your.email@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_USERNAME/interview-scheduling-engine"
+  },
+  "dependencies": {
+    "date-fns": "^3.0.0",
+    "date-fns-tz": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "@typescript-eslint/eslint-plugin": "^6.16.0",
+    "@typescript-eslint/parser": "^6.16.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.1",
+    "tsup": "^8.0.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
