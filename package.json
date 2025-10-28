@@ -35,11 +35,11 @@
     "backtracking",
     "algorithm"
   ],
-  "author": "Ravi Hebbar <your.email@example.com>",
+  "author": "Ravindra Kanchikare (krhebbar)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/YOUR_USERNAME/interview-scheduling-engine"
+    "url": "https://github.com/krhebbar/interview-scheduling-engine"
   },
   "dependencies": {
     "date-fns": "^3.0.0",
