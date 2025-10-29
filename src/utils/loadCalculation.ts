@@ -10,6 +10,8 @@
  * - Load density calculation (current / max)
  */
 
+import { startOfWeek, endOfWeek, isWithinInterval, parseISO } from 'date-fns';
+import { zonedTimeToUtc } from 'date-fns-tz';
 import type {
   Interviewer,
   InterviewSlot,
@@ -34,7 +36,10 @@ export async function calculateInterviewerLoad(
   existingEvents: CalendarEvent[],
   options: SchedulingOptions = {}
 ): Promise<LoadInfo> {
-  const slotDate = new Date(proposedSlot.startTime);
+  const slotDate = zonedTimeToUtc(
+    proposedSlot.startTime,
+    interviewer.timezone.tzCode
+  );
   const slotDuration = calculateSlotDuration(proposedSlot);
 
   // Calculate daily load
@@ -116,19 +121,16 @@ function calculateWeeklyLoad(
   max: number;
   density: number;
 } {
-  // Get start of week (Sunday)
-  const weekStart = new Date(date);
-  weekStart.setDate(date.getDate() - date.getDay());
-  weekStart.setHours(0, 0, 0, 0);
-
-  // Get end of week (Saturday)
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
+  const weekStart = startOfWeek(date);
+  const weekEnd = endOfWeek(date);
 
   // Get events for this week
   const weekEvents = existingEvents.filter(event => {
-    const eventDate = new Date(event.start);
-    return eventDate >= weekStart && eventDate < weekEnd;
+    const eventDate = zonedTimeToUtc(
+      event.start,
+      interviewer.timezone.tzCode
+    );
+    return isWithinInterval(eventDate, { start: weekStart, end: weekEnd });
   });
 
   const weeklyLimit = interviewer.limits.weekly;
@@ -158,10 +160,10 @@ function calculateWeeklyLoad(
  * Calculate duration of a slot in minutes
  */
 function calculateSlotDuration(slot: InterviewSlot): number {
-  const start = new Date(slot.startTime);
-  const end = new Date(slot.endTime);
-
-  return (end.getTime() - start.getTime()) / (1000 * 60); // minutes
+  return (
+    (parseISO(slot.endTime).getTime() - parseISO(slot.startTime).getTime()) /
+    (1000 * 60)
+  );
 }
 
 /**

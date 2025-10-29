@@ -8,6 +8,14 @@
  * - Blocked times
  */
 
+import { zonedTimeToUtc, utcToZonedTime, format } from 'date-fns-tz';
+import {
+  parse,
+  getHours,
+  getMinutes,
+  isSameDay,
+  isWithinInterval,
+} from 'date-fns';
 import type {
   Interviewer,
   SchedulingOptions,
@@ -15,6 +23,7 @@ import type {
   TimeRange,
 } from '../types';
 import { isTimeInRange } from './conflictDetection';
+import { DAYS_OF_WEEK } from '../constants';
 
 export interface AvailabilityResult {
   available: boolean;
@@ -38,9 +47,11 @@ export async function isInterviewerAvailable(
 ): Promise<AvailabilityResult> {
   const conflicts: SlotConflict[] = [];
 
-  const start = new Date(startTime);
-  const end = new Date(endTime);
-  const date = start.toISOString().split('T')[0];
+  const start = zonedTimeToUtc(startTime, interviewer.timezone.tzCode);
+  const end = zonedTimeToUtc(endTime, interviewer.timezone.tzCode);
+  const date = format(start, 'yyyy-MM-dd', {
+    timeZone: interviewer.timezone.tzCode,
+  });
 
   // Check work hours
   if (options.respectWorkHours !== false) {
@@ -86,7 +97,8 @@ function checkWorkHours(
   start: Date,
   end: Date
 ): SlotConflict | null {
-  const dayOfWeek = getDayOfWeek(start);
+  const zonedStart = utcToZonedTime(start, interviewer.timezone.tzCode);
+  const dayOfWeek = getDayOfWeek(zonedStart);
   const workHours = interviewer.workHours[dayOfWeek];
 
   if (!workHours) {
@@ -97,15 +109,15 @@ function checkWorkHours(
     };
   }
 
-  // Convert to minutes from midnight
-  const startMinutes = start.getHours() * 60 + start.getMinutes();
-  const endMinutes = end.getHours() * 60 + end.getMinutes();
+  const workStartTime = parse(workHours.startTime, 'HH:mm', new Date());
+  const workEndTime = parse(workHours.endTime, 'HH:mm', new Date());
 
-  const [workStartHours, workStartMins] = workHours.startTime.split(':').map(Number);
-  const [workEndHours, workEndMins] = workHours.endTime.split(':').map(Number);
+  const startMinutes = getHours(zonedStart) * 60 + getMinutes(zonedStart);
+  const endMinutes = getHours(end) * 60 + getMinutes(end);
 
-  const workStartMinutes = workStartHours * 60 + workStartMins;
-  const workEndMinutes = workEndHours * 60 + workEndMins;
+  const workStartMinutes =
+    getHours(workStartTime) * 60 + getMinutes(workStartTime);
+  const workEndMinutes = getHours(workEndTime) * 60 + getMinutes(workEndTime);
 
   if (startMinutes < workStartMinutes || endMinutes > workEndMinutes) {
     return {
@@ -127,7 +139,9 @@ function checkHolidays(
 ): SlotConflict | null {
   if (!interviewer.holidays) return null;
 
-  const holiday = interviewer.holidays.find(h => h.date === date);
+  const holiday = interviewer.holidays.find(h =>
+    isSameDay(parse(h.date, 'yyyy-MM-dd', new Date()), date)
+  );
 
   if (holiday) {
     return {
@@ -149,7 +163,11 @@ function checkDayOffs(
 ): SlotConflict | null {
   if (!interviewer.dayOffs) return null;
 
-  if (interviewer.dayOffs.includes(date)) {
+  if (
+    interviewer.dayOffs.some(d =>
+      isSameDay(parse(d, 'yyyy-MM-dd', new Date()), date)
+    )
+  ) {
     return {
       type: 'day_off',
       interviewerId: interviewer.id,
@@ -170,16 +188,18 @@ function checkBlockedTimes(
 ): SlotConflict | null {
   if (!interviewer.blockedTimes) return null;
 
-  for (const blocked of interviewer.blockedTimes) {
-    // Check overlap
-    const blockedStart = new Date(blocked.start);
-    const blockedEnd = new Date(blocked.end);
-    const slotStart = new Date(startTime);
-    const slotEnd = new Date(endTime);
+  const slotInterval = {
+    start: zonedTimeToUtc(startTime, interviewer.timezone.tzCode),
+    end: zonedTimeToUtc(endTime, interviewer.timezone.tzCode),
+  };
 
-    if (
-      !(slotEnd <= blockedStart || slotStart >= blockedEnd)
-    ) {
+  for (const blocked of interviewer.blockedTimes) {
+    const blockedInterval = {
+      start: zonedTimeToUtc(blocked.start, interviewer.timezone.tzCode),
+      end: zonedTimeToUtc(blocked.end, interviewer.timezone.tzCode),
+    };
+
+    if (isWithinInterval(slotInterval.start, blockedInterval)) {
       return {
         type: 'recruiting_block',
         interviewerId: interviewer.id,
@@ -195,15 +215,5 @@ function checkBlockedTimes(
  * Get day of week from Date object
  */
 function getDayOfWeek(date: Date): keyof typeof import('../types').WorkHours {
-  const days = [
-    'sunday',
-    'monday',
-    'tuesday',
-    'wednesday',
-    'thursday',
-    'friday',
-    'saturday',
-  ] as const;
-
-  return days[date.getDay()];
+  return DAYS_OF_WEEK[date.getDay()];
 }

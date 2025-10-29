@@ -25,12 +25,20 @@ import type {
   SlotVerificationResult,
   Interviewer,
 } from '../types';
+import { addDays, format, isBefore, isEqual } from 'date-fns';
+import { zonedTimeToUtc } from 'date-fns-tz';
 import {
   findSlotsForDay,
   findMultiDaySlots,
 } from '../algorithms/slotFinder';
 import { isTimeOverlap } from '../utils/conflictDetection';
 import { calculateInterviewerLoad } from '../utils/loadCalculation';
+import { MINUTES_IN_DAY } from '../constants';
+import {
+  SlotBookingError,
+  ValidationError,
+  SchedulingError,
+} from '../errors';
 
 /**
  * Main Scheduling Engine
@@ -97,55 +105,81 @@ export class SchedulingEngine {
   async findSlots(
     options: FindSlotsOptions
   ): Promise<SessionCombination[] | MultiDayPlan[]> {
-    const mergedOptions = {
-      ...this.config.defaultOptions,
-      ...options.options,
-    };
+    try {
+      if (!options.sessions || options.sessions.length === 0) {
+        throw new ValidationError('At least one session is required.');
+      }
+      if (!options.interviewers || options.interviewers.length === 0) {
+        throw new ValidationError('At least one interviewer is required.');
+      }
+      if (!options.dateRange.start || !options.dateRange.end) {
+        throw new ValidationError('A date range with a start and end is required.');
+      }
 
-    // Check if multi-day scheduling is needed
-    const needsMultiDay = this.needsMultiDayScheduling(options.sessions);
+      const mergedOptions = {
+        ...this.config.defaultOptions,
+        ...options.options,
+      };
 
-    // Fetch calendar events for all interviewers
-    const calendarEvents = await this.fetchCalendarEvents(
-      options.interviewers,
-      options.dateRange
-    );
+      // Check if multi-day scheduling is needed
+      const needsMultiDay = this.needsMultiDayScheduling(options.sessions);
 
-    if (needsMultiDay) {
-      return await findMultiDaySlots(
-        options.sessions,
+      // Fetch calendar events for all interviewers
+      const calendarEvents = await this.fetchCalendarEvents(
         options.interviewers,
-        options.dateRange,
-        calendarEvents,
-        mergedOptions
+        options.dateRange
       );
-    } else {
-      // Single day scheduling - find slots for each day in range
-      const allSlots: SessionCombination[] = [];
-      const currentDate = new Date(options.dateRange.start);
-      const endDate = new Date(options.dateRange.end);
 
-      while (currentDate <= endDate) {
-        const dateStr = currentDate.toISOString().split('T')[0];
-        const daySlots = await findSlotsForDay(
+      if (needsMultiDay) {
+        return await findMultiDaySlots(
           options.sessions,
           options.interviewers,
-          dateStr,
+          options.dateRange,
           calendarEvents,
           mergedOptions
         );
+      } else {
+        // Single day scheduling - find slots for each day in range
+        const allSlots: SessionCombination[] = [];
+        let currentDate = zonedTimeToUtc(
+          options.dateRange.start,
+          this.config.timezone
+        );
+        const endDate = zonedTimeToUtc(
+          options.dateRange.end,
+          this.config.timezone
+        );
 
-        allSlots.push(...daySlots);
+        while (isBefore(currentDate, endDate) || isEqual(currentDate, endDate)) {
+          const dateStr = format(currentDate, 'yyyy-MM-dd');
+          const daySlots = await findSlotsForDay(
+            options.sessions,
+            options.interviewers,
+            dateStr,
+            calendarEvents,
+            mergedOptions
+          );
 
-        // Check max results
-        if (mergedOptions.maxResults && allSlots.length >= mergedOptions.maxResults) {
-          break;
+          allSlots.push(...daySlots);
+
+          // Check max results
+          if (
+            mergedOptions.maxResults &&
+            allSlots.length >= mergedOptions.maxResults
+          ) {
+            break;
+          }
+
+          currentDate = addDays(currentDate, 1);
         }
 
-        currentDate.setDate(currentDate.getDate() + 1);
+        return allSlots.slice(0, mergedOptions.maxResults);
       }
-
-      return allSlots.slice(0, mergedOptions.maxResults);
+    } catch (error) {
+      if (error instanceof SchedulingError) {
+        throw error;
+      }
+      throw new SchedulingError(`Failed to find slots: ${error.message}`);
     }
   }
 
@@ -161,7 +195,7 @@ export class SchedulingEngine {
    * @returns Available slots for that date
    */
   async findSlotsForDate(
-    sessions: InterviewSlot['sessionId'][],
+    sessions: InterviewSession[],
     interviewers: Interviewer[],
     date: string,
     options?: FindSlotsOptions['options']
@@ -176,9 +210,8 @@ export class SchedulingEngine {
       end: date,
     });
 
-    // Type assertion needed here since we're passing session IDs
     return await findSlotsForDay(
-      sessions as any,
+      sessions,
       interviewers,
       date,
       calendarEvents,
@@ -307,22 +340,23 @@ export class SchedulingEngine {
    * ```
    */
   async bookSlot(request: BookingRequest): Promise<BookingResult> {
-    // Extract slots
-    let slots: InterviewSlot[];
-    if (typeof request.slot === 'string') {
-      throw new Error('Slot ID booking not yet implemented. Pass full slot object.');
-    } else if ('rounds' in request.slot) {
-      // Multi-day plan
-      slots = request.slot.rounds.flatMap(r => r.combination.slots);
-    } else {
-      // Single combination
-      slots = request.slot.slots;
-    }
-
-    const errors: string[] = [];
-    const calendarEventIds: string[] = [];
-
     try {
+      // Extract slots
+      let slots: InterviewSlot[];
+      if (typeof request.slot === 'string') {
+        throw new SlotBookingError(
+          'Slot ID booking not yet implemented. Pass full slot object.'
+        );
+      } else if ('rounds' in request.slot) {
+        // Multi-day plan
+        slots = request.slot.rounds.flatMap(r => r.combination.slots);
+      } else {
+        // Single combination
+        slots = request.slot.slots;
+      }
+
+      const calendarEventIds: string[] = [];
+
       // Create calendar events if requested
       if (request.createCalendarEvents) {
         for (const slot of slots) {
@@ -346,16 +380,10 @@ export class SchedulingEngine {
         createdAt: new Date().toISOString(),
       };
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : 'Unknown error');
-
-      return {
-        id: `booking-${Date.now()}`,
-        slots,
-        calendarEventIds,
-        status: 'failed',
-        createdAt: new Date().toISOString(),
-        errors,
-      };
+      if (error instanceof SchedulingError) {
+        throw error;
+      }
+      throw new SlotBookingError(`Failed to book slot: ${error.message}`);
     }
   }
 
@@ -525,7 +553,7 @@ export class SchedulingEngine {
    * Determine if multi-day scheduling is needed
    */
   private needsMultiDayScheduling(sessions: FindSlotsOptions['sessions']): boolean {
-    return sessions.some(session => session.breakAfter >= 1440); // 1440 min = 1 day
+    return sessions.some(session => session.breakAfter >= MINUTES_IN_DAY);
   }
 
   /**

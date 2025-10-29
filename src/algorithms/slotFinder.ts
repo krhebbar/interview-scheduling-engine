@@ -23,6 +23,7 @@ import type {
   SlotConflict,
   LoadInfo,
 } from '../types';
+import { addDays, addMinutes, isBefore, isEqual } from 'date-fns';
 import {
   isTimeOverlap,
   subtractTimeChunks,
@@ -30,6 +31,7 @@ import {
 } from '../utils/conflictDetection';
 import { isInterviewerAvailable } from '../utils/availabilityCheck';
 import { calculateInterviewerLoad } from '../utils/loadCalculation';
+import { MINUTES_IN_DAY, DEFAULT_APPOINTMENT_START_TIME } from '../constants';
 
 /**
  * Find all available slots for a single day
@@ -75,19 +77,13 @@ export async function findSlotsForDay(
   );
 
   // Generate all possible slot combinations
-  const slotCombinations: SessionCombination[] = [];
-
-  // Use backtracking to explore combinations
-  await exploreSlotCombinations(
+  const slotCombinations = await generateAllSlotCombinations(
     sortedSessions,
     sessionCombinations,
     interviewers,
     date,
     calendarEvents,
-    options,
-    [],
-    0,
-    slotCombinations
+    options
   );
 
   // Sort by start time and load density
@@ -102,6 +98,29 @@ export async function findSlotsForDay(
     const avgDensityB = getAverageLoadDensity(b.loadDensity);
     return avgDensityA - avgDensityB;
   });
+}
+
+async function generateAllSlotCombinations(
+  sortedSessions: InterviewSession[],
+  sessionCombinations: Map<string, Interviewer[][]>,
+  interviewers: Interviewer[],
+  date: string,
+  calendarEvents: Map<string, CalendarEvent[]>,
+  options: SchedulingOptions
+): Promise<SessionCombination[]> {
+  const slotCombinations: SessionCombination[] = [];
+  await exploreSlotCombinations(
+    sortedSessions,
+    sessionCombinations,
+    interviewers,
+    date,
+    calendarEvents,
+    options,
+    [],
+    0,
+    slotCombinations
+  );
+  return slotCombinations;
 }
 
 /**
@@ -199,57 +218,90 @@ async function findRoundSlots(
   if (previousRounds.length > 0) {
     const lastRound = previousRounds[previousRounds.length - 1];
     const lastSession = currentRoundSessions[0];
-    const gapDays = Math.ceil(lastSession.breakAfter / 1440); // 1440 minutes per day
+    const gapDays = Math.ceil(lastSession.breakAfter / MINUTES_IN_DAY);
     searchStartDate = addDays(lastRound.date, gapDays);
   }
 
   // Try each day in range for this round
-  let currentDate = searchStartDate;
-  while (currentDate <= endDate) {
-    // Find slots for this round on this day
-    const daySlots = await findSlotsForDay(
+  let currentDate = new Date(searchStartDate);
+  const end = new Date(endDate);
+  while (isBefore(currentDate, end) || isEqual(currentDate, end)) {
+    await findSlotsForRound(
+      currentDate,
       currentRoundSessions,
       interviewers,
-      currentDate,
       calendarEvents,
-      options
+      options,
+      previousRounds,
+      rounds,
+      currentRoundIndex,
+      startDate,
+      endDate,
+      results
     );
 
-    // For each valid slot, recursively try next rounds
-    for (const slotCombo of daySlots) {
-      // Verify no conflicts with previous rounds' interviewers
-      if (hasInterviewerConflictWithPreviousRounds(slotCombo, previousRounds)) {
-        continue;
-      }
-
-      const roundPlan: RoundPlan = {
-        roundNumber: currentRoundIndex,
-        date: currentDate,
-        combination: slotCombo,
-        sessions: currentRoundSessions,
-      };
-
-      // Recursively schedule next rounds
-      await findRoundSlots(
-        rounds,
-        currentRoundIndex + 1,
-        [...previousRounds, roundPlan],
-        startDate,
-        endDate,
-        interviewers,
-        calendarEvents,
-        options,
-        results
-      );
-
-      // Check if we've found enough results
-      if (options.maxResults && results.length >= options.maxResults) {
-        return;
-      }
+    // Check if we've found enough results
+    if (options.maxResults && results.length >= options.maxResults) {
+      return;
     }
 
     // Move to next day
     currentDate = addDays(currentDate, 1);
+  }
+}
+
+async function findSlotsForRound(
+  currentDate: Date,
+  currentRoundSessions: InterviewSession[],
+  interviewers: Interviewer[],
+  calendarEvents: Map<string, CalendarEvent[]>,
+  options: SchedulingOptions,
+  previousRounds: RoundPlan[],
+  rounds: InterviewSession[][],
+  currentRoundIndex: number,
+  startDate: string,
+  endDate: string,
+  results: MultiDayPlan[]
+) {
+  const daySlots = await findSlotsForDay(
+    currentRoundSessions,
+    interviewers,
+    currentDate.toISOString().split('T')[0],
+    calendarEvents,
+    options
+  );
+
+  // For each valid slot, recursively try next rounds
+  for (const slotCombo of daySlots) {
+    // Verify no conflicts with previous rounds' interviewers
+    if (hasInterviewerConflictWithPreviousRounds(slotCombo, previousRounds)) {
+      continue;
+    }
+
+    const roundPlan: RoundPlan = {
+      roundNumber: currentRoundIndex,
+      date: currentDate.toISOString().split('T')[0],
+      combination: slotCombo,
+      sessions: currentRoundSessions,
+    };
+
+    // Recursively schedule next rounds
+    await findRoundSlots(
+      rounds,
+      currentRoundIndex + 1,
+      [...previousRounds, roundPlan],
+      startDate,
+      endDate,
+      interviewers,
+      calendarEvents,
+      options,
+      results
+    );
+
+    // Check if we've found enough results
+    if (options.maxResults && results.length >= options.maxResults) {
+      return;
+    }
   }
 }
 
@@ -411,33 +463,15 @@ async function exploreSlotCombinations(
 
   // Try each interviewer combination
   for (const interviewerCombo of combinations) {
-    // Create slot for this session
-    const slot: InterviewSlot = {
-      id: `slot-${session.id}-${Date.now()}`,
-      sessionId: session.id,
-      sessionName: session.name,
-      startTime,
-      endTime: addMinutesToTime(startTime, session.duration),
-      interviewers: interviewerCombo.map(int => ({
-        interviewerId: int.id,
-        name: int.name,
-        email: int.email,
-        isTraining: int.isTraining,
-        status: 'pending',
-      })),
-      meetingType: session.meetingType || 'google_meet',
-      location: session.location,
-    };
-
-    // Check conflicts
-    const conflicts = await checkSlotConflicts(
-      slot,
+    const slot = await createAndCheckSlot(
+      session,
       interviewerCombo,
+      startTime,
       calendarEvents,
       options
     );
 
-    if (conflicts.length === 0) {
+    if (slot) {
       // No conflicts - continue backtracking
       await exploreSlotCombinations(
         sessions,
@@ -457,6 +491,40 @@ async function exploreSlotCombinations(
       }
     }
   }
+}
+
+async function createAndCheckSlot(
+  session: InterviewSession,
+  interviewerCombo: Interviewer[],
+  startTime: string,
+  calendarEvents: Map<string, CalendarEvent[]>,
+  options: SchedulingOptions
+): Promise<InterviewSlot | null> {
+  const slot: InterviewSlot = {
+    id: `slot-${session.id}-${Date.now()}`,
+    sessionId: session.id,
+    sessionName: session.name,
+    startTime,
+    endTime: addMinutesToTime(startTime, session.duration),
+    interviewers: interviewerCombo.map(int => ({
+      interviewerId: int.id,
+      name: int.name,
+      email: int.email,
+      isTraining: int.isTraining,
+      status: 'pending',
+    })),
+    meetingType: session.meetingType || 'google_meet',
+    location: session.location,
+  };
+
+  const conflicts = await checkSlotConflicts(
+    slot,
+    interviewerCombo,
+    calendarEvents,
+    options
+  );
+
+  return conflicts.length === 0 ? slot : null;
 }
 
 /**
@@ -575,7 +643,7 @@ function calculateSessionStartTime(
 ): string {
   if (previousSlots.length === 0) {
     // First session - start at 9 AM by default
-    return `${date}T09:00:00.000Z`;
+    return `${date}T${DEFAULT_APPOINTMENT_START_TIME}`;
   }
 
   const lastSlot = previousSlots[previousSlots.length - 1];
@@ -589,18 +657,7 @@ function calculateSessionStartTime(
  * Add minutes to an ISO 8601 time string
  */
 function addMinutesToTime(timeStr: string, minutes: number): string {
-  const date = new Date(timeStr);
-  date.setMinutes(date.getMinutes() + minutes);
-  return date.toISOString();
-}
-
-/**
- * Add days to a date string
- */
-function addDays(dateStr: string, days: number): string {
-  const date = new Date(dateStr);
-  date.setDate(date.getDate() + days);
-  return date.toISOString().split('T')[0];
+  return addMinutes(new Date(timeStr), minutes).toISOString();
 }
 
 /**
