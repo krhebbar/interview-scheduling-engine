@@ -619,7 +619,7 @@ function groupSessionsIntoRounds(sessions: InterviewSession[]): InterviewSession
     currentRound.push(session);
 
     // If break is >= 1 day, start new round
-    if (session.breakAfter >= 1440) {
+    if (session.breakAfter >= MINUTES_IN_DAY) {
       rounds.push(currentRound);
       currentRound = [];
     }
@@ -647,7 +647,6 @@ function calculateSessionStartTime(
   }
 
   const lastSlot = previousSlots[previousSlots.length - 1];
-  const lastSession = session; // Get session from context
 
   // Add break duration to last end time
   return addMinutesToTime(lastSlot.endTime, session.breakAfter);
@@ -655,6 +654,16 @@ function calculateSessionStartTime(
 
 /**
  * Add minutes to an ISO 8601 time string
+ *
+ * @param timeStr - ISO 8601 formatted time string
+ * @param minutes - Number of minutes to add
+ * @returns New ISO 8601 time string with minutes added
+ *
+ * @example
+ * ```typescript
+ * addMinutesToTime('2024-01-01T09:00:00.000Z', 30)
+ * // Returns: '2024-01-01T09:30:00.000Z'
+ * ```
  */
 function addMinutesToTime(timeStr: string, minutes: number): string {
   return addMinutes(new Date(timeStr), minutes).toISOString();
@@ -662,6 +671,21 @@ function addMinutesToTime(timeStr: string, minutes: number): string {
 
 /**
  * Calculate total duration of slots including breaks
+ *
+ * Computes the time span from the start of the first slot
+ * to the end of the last slot, including any breaks between them.
+ *
+ * @param slots - Array of interview slots in chronological order
+ * @returns Total duration in minutes, or 0 if slots array is empty
+ *
+ * @example
+ * ```typescript
+ * const slots = [
+ *   { startTime: '09:00', endTime: '10:00' },
+ *   { startTime: '10:15', endTime: '11:00' }
+ * ];
+ * calculateTotalDuration(slots); // Returns: 120 minutes
+ * ```
  */
 function calculateTotalDuration(slots: InterviewSlot[]): number {
   if (slots.length === 0) return 0;
@@ -674,21 +698,37 @@ function calculateTotalDuration(slots: InterviewSlot[]): number {
 
 /**
  * Calculate load density for each interviewer in the combination
+ *
+ * Returns a simplified load density based on the number of slots
+ * each interviewer is assigned to. For accurate load calculation
+ * with respect to daily/weekly limits, use calculateInterviewerLoad
+ * from loadCalculation.ts.
+ *
+ * @param slots - Interview slots to calculate load for
+ * @param allInterviewers - All interviewers in the pool
+ * @returns Map of interviewer ID to load density (0-1+ scale)
  */
 function calculateLoadDensity(
   slots: InterviewSlot[],
   allInterviewers: Interviewer[]
 ): Record<string, number> {
-  // Simplified - would need actual load calculation
   const density: Record<string, number> = {};
+  const slotCounts: Record<string, number> = {};
 
+  // Count slots per interviewer
   for (const slot of slots) {
     for (const assignment of slot.interviewers) {
-      if (!density[assignment.interviewerId]) {
-        density[assignment.interviewerId] = 0;
-      }
-      density[assignment.interviewerId] += 0.1; // Placeholder
+      slotCounts[assignment.interviewerId] =
+        (slotCounts[assignment.interviewerId] || 0) + 1;
     }
+  }
+
+  // Calculate density based on slot count
+  // Assumes each interviewer can handle ~3-5 interviews per session combination
+  const TYPICAL_MAX_SLOTS = 4;
+
+  for (const [interviewerId, count] of Object.entries(slotCounts)) {
+    density[interviewerId] = count / TYPICAL_MAX_SLOTS;
   }
 
   return density;
@@ -706,6 +746,26 @@ function getAverageLoadDensity(loadDensity?: Record<string, number>): number {
 
 /**
  * Check if slot has interviewer conflicts with previous rounds
+ *
+ * Detects if any interviewer in the current slot combination
+ * has already been assigned in a previous round. This helps
+ * prevent double-booking the same interviewer across different
+ * rounds of a multi-day interview process.
+ *
+ * @param slotCombo - Current slot combination being evaluated
+ * @param previousRounds - Array of already scheduled rounds
+ * @returns True if there's an interviewer conflict, false otherwise
+ *
+ * @example
+ * ```typescript
+ * const hasConflict = hasInterviewerConflictWithPreviousRounds(
+ *   currentCombination,
+ *   [round1, round2]
+ * );
+ * if (hasConflict) {
+ *   // Skip this combination or find alternative
+ * }
+ * ```
  */
 function hasInterviewerConflictWithPreviousRounds(
   slotCombo: SessionCombination,
@@ -736,6 +796,18 @@ function hasInterviewerConflictWithPreviousRounds(
 
 /**
  * Extract all unique interviewer IDs from round plans
+ *
+ * Collects a deduplicated list of all interviewer IDs
+ * participating across multiple rounds of interviews.
+ *
+ * @param rounds - Array of scheduled round plans
+ * @returns Array of unique interviewer IDs
+ *
+ * @example
+ * ```typescript
+ * const allInterviewers = extractAllInterviewers([round1, round2, round3]);
+ * console.log(`Total unique interviewers: ${allInterviewers.length}`);
+ * ```
  */
 function extractAllInterviewers(rounds: RoundPlan[]): string[] {
   const interviewerSet = new Set<string>();
@@ -753,6 +825,12 @@ function extractAllInterviewers(rounds: RoundPlan[]): string[] {
 
 /**
  * Generate unique ID for a session combination
+ *
+ * Creates a unique identifier for a slot combination based on
+ * the session IDs and current timestamp.
+ *
+ * @param slots - Array of interview slots in the combination
+ * @returns Unique combination ID (e.g., "combo-s1-s2-s3-1699999999")
  */
 function generateSlotCombinationId(slots: InterviewSlot[]): string {
   return `combo-${slots.map(s => s.sessionId).join('-')}-${Date.now()}`;
@@ -760,6 +838,12 @@ function generateSlotCombinationId(slots: InterviewSlot[]): string {
 
 /**
  * Generate unique ID for a multi-day plan
+ *
+ * Creates a unique identifier for a multi-day interview plan
+ * based on the scheduled dates and current timestamp.
+ *
+ * @param rounds - Array of round plans
+ * @returns Unique plan ID (e.g., "plan-2024-01-01-2024-01-05-1699999999")
  */
 function generatePlanId(rounds: RoundPlan[]): string {
   return `plan-${rounds.map(r => r.date).join('-')}-${Date.now()}`;

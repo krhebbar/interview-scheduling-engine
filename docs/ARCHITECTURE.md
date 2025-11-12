@@ -740,7 +740,7 @@ CREATE TABLE interviewer_availability (
 
 ---
 
-## Production Considerations
+## Deployment Considerations
 
 ### 1. Monitoring
 
@@ -815,7 +815,7 @@ This architecture balances:
 - ✅ **Scalability**: Handles 1000+ interviews/day
 - ✅ **Maintainability**: Clear separation of concerns
 
-**Built from production experience scheduling 10,000+ interviews.**
+**An experimental implementation demonstrating scheduling algorithms at scale.**
 
 ---
 

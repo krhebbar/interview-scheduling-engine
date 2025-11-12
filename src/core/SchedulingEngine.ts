@@ -21,6 +21,7 @@ import type {
   CandidateAvailabilityRequest,
   CandidateAvailability,
   InterviewSlot,
+  InterviewSession,
   CalendarEvent,
   SlotVerificationResult,
   Interviewer,
