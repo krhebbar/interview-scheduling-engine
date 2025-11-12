@@ -1,6 +1,6 @@
 # Interview Scheduling Engine
 
-**Production-grade TypeScript library for intelligent interview scheduling with multi-day support, load balancing, and calendar integration.**
+**Experimental TypeScript library for intelligent interview scheduling with multi-day support, load balancing, and calendar integration.**
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -11,7 +11,7 @@
 
 A sophisticated scheduling engine designed for high-volume recruiting operations. Solves the complex constraint satisfaction problem of scheduling multi-round interviews across multiple interviewers with calendar conflicts, load limits, and timezone considerations.
 
-**Built from production experience scheduling 1,000+ interviews monthly across global teams.**
+**An experimental open-source project exploring advanced scheduling algorithms for interview coordination.**
 
 ---
 
@@ -55,35 +55,22 @@ A sophisticated scheduling engine designed for high-volume recruiting operations
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                         │
-│  (Your recruiting application, API endpoints, UI)            │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     │ Uses
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Scheduling Engine API                       │
-│  • findSlots()  • verifySlots()  • bookSlots()              │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-        ┌────────────┼────────────┐
-        │            │            │
-        ▼            ▼            ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│   Slot       │ │  Conflict    │ │    Load      │
-│  Finding     │ │  Detection   │ │  Management  │
-│  Algorithms  │ │   Engine     │ │   Engine     │
-└──────┬───────┘ └──────┬───────┘ └──────┬───────┘
-       │                │                │
-       └────────────────┴────────────────┘
-                        │
-                        ▼
-        ┌───────────────────────────────┐
-        │     Calendar Integration      │
-        │  Google • Outlook • Custom    │
-        └───────────────────────────────┘
+```mermaid
+graph TD
+    A[Application Layer<br/>Your recruiting application, API endpoints, UI]
+    B[Scheduling Engine API<br/>findSlots • verifySlots • bookSlots]
+    C[Slot Finding<br/>Algorithms]
+    D[Conflict<br/>Detection Engine]
+    E[Load<br/>Management Engine]
+    F[Calendar Integration<br/>Google • Outlook • Custom]
+
+    A -->|Uses| B
+    B --> C
+    B --> D
+    B --> E
+    C --> F
+    D --> F
+    E --> F
 ```
 
 ---
@@ -517,7 +504,7 @@ MIT License - see [`LICENSE`](./LICENSE) for details.
 
 ## About
 
-Built with production lessons from scheduling thousands of interviews across global teams. Demonstrates expertise in:
+An experimental open-source project demonstrating advanced concepts in:
 
 - Complex algorithm design
 - Constraint satisfaction problems
